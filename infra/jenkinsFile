@@ -1,0 +1,286 @@
+// #!/usr/bin/env groovy
+
+// @Library("P-Funk")
+
+// import org.daas_watchguard.basefunctions.*
+// import org.daas_watchguard.notifications.*
+// import org.daas_watchguard.unittest.*
+// import org.daas_watchguard.validators.*
+// import org.wgc.deployment.accountgroup.*
+// import org.wgc.deployment.environment.*
+// import org.wgc.deployment.region.*
+// import org.wgc.jenkins.parameter.*
+// import org.wgc.jenkins.property.*
+// import org.wgc.jenkins.config.*
+// import org.wgc.deployment.overrides.*
+// import org.wgc.sonarqube.*
+
+
+// def microserviceBuild = new Microservices() // org.daas_watchguard.basefunctions.Microservices
+// def notifications = new Teams() // org.daas_watchguard.notifications.Teams
+// def pylintTests = new pylint()
+// def pythonTests = new Python() // for python testing
+// def sqTesting = new sonarqube()
+
+// String githubUser = "jenkins-gh"
+// String githubEnterprise = "github.infra.int.daas-watchguard.com"
+// String teamName = "Platform"
+// String repoName = "aqe-datasource-schema"
+// String wgPythonLambdaLayerRepoName = "wg-python-lambda-layer"
+
+// String githubUrl = "https://${githubEnterprise}/${teamName}/${repoName}.git"
+// String wgPythonLambdaLayerGithubUrl = "https://${githubEnterprise}/wgc-common/${wgPythonLambdaLayerRepoName}.git"
+
+// String defaultAccountGroup = "WGCloud"
+// AccountGroups accountGroups = new AccountGroups(this, defaultAccountGroup)
+// accountGroups.loadConfig()
+
+// JobProperties jobProps = new JobProperties(this)
+// jobProps.addStandard([JobProperties.DISABLE_CONCURRENT_BUILDS, JobProperties.DISCARD_OLD_BUILDS])
+
+// JobParameters jobParams = new JobParameters(this)
+// jobParams.addStandard([JobParameters.ACCOUNT_GROUP, JobParameters.REGION])
+// microserviceBuild.addIsDeploymentEnabledParam(jobParams, JobParameters, env.BRANCH_NAME)
+
+// String accountGroup = accountGroups.getAccountGroupForSelected(params.get(JobParameters.ACCOUNT_GROUP))
+// String branch = env.BRANCH_NAME
+// String environment = accountGroups.getEnvironmentForSelected(accountGroup, null, branch)
+// String region = accountGroups.getRegionForSelected(accountGroup, environment, params.get(JobParameters.REGION))
+// String lambdaPackageName = "${repoName}-${BUILD_ID}-${branch}.zip"
+// String pylintTestsPythonPath = "../${repoName}/tests"
+// String unitTestsPythonPath = "./${repoName}/tests"
+// Boolean isDeploymentEnabled = microserviceBuild.getIsDeploymentEnabledParam(JobParameters, env.BRANCH_NAME)
+
+// SonarQubeAPI sonarQubeAPI = new SonarQubeAPI(this, environment, teamName, repoName, branch)
+
+// JobConfig jobConfig = new JobConfig(this, jobParams, jobProps, environment)
+// jobConfig.build()
+
+// def files = ""
+
+// echo("AccountGroup: ${accountGroup}")
+// echo("Branch: ${branch}")
+// echo("Environment: ${environment}")
+// echo("Region: ${region}")
+// echo("isDeploymentEnabled flag: ${isDeploymentEnabled}")
+
+
+// node("cje_general_v2") {
+//     deleteDir()
+
+//     try {
+//         stage("Checkout") {
+//             dir("files") {
+//                 println("Service code branch: ${branch}")
+//                 /*
+//                     Storing checkout variables to fetch commit related information.
+//                     In this case the commits will be used to get the files changed.
+//                 */
+//                 def checkoutVariables = checkout(
+//                     [
+//                         $class: 'GitSCM',
+//                         branches: [
+//                             [
+//                                 name: '*/' + env.BRANCH_NAME
+//                             ]
+//                         ],
+//                         doGenerateSubmoduleConfigurations: false,
+//                         userRemoteConfigs: [
+//                             [
+//                                 credentialsId: "jenkins-gh",
+//                                 url: githubUrl
+//                             ]
+//                         ]
+//                     ]
+//                 )
+
+//                 files = getModifiedFiles(checkoutVariables)
+//                 transformedString = ""
+//                 if (files) {
+//                     transformedString = transformString(files)
+//                 }
+//             }
+            
+//             dir("wg-python-lambda-layer"){
+//                 println("wg-python-lambda-layer code branch: ${branch}")
+//                 microserviceBuild.checkOut(wgPythonLambdaLayerGithubUrl, branch, githubUser)
+//             }
+//         }
+
+//         stage("Install Requirements") {
+//             dir("files") {
+//                 dir("deploy") {
+//                    script {
+//                         if (fileExists("requirements.txt")) {
+//                             sh("python3.10 -m pip install -r requirements.txt")
+//                             sh('python3.10 -m pip install --upgrade aws-sam-cli')
+//                         }
+//                     } 
+//                 }
+//             }
+
+//             dir("files/application") {
+//                 script {
+//                     if (fileExists("requirements.txt")) {
+//                         sh("python3.10 -m pip install -r requirements.txt")
+//                     }
+//                 }
+//                 dir("tests") {
+//                     if (fileExists("requirements.txt")) {
+//                         sh("python3.10 -m pip install -r requirements.txt")
+//                     }
+//                 }
+//                 dir("common") {
+//                     script {
+//                     if (fileExists("requirements.txt")) {
+//                         sh("python3.10 -m pip install -r requirements.txt -t python")
+//                     }
+//                  }
+//                 }
+//             }
+
+//             dir("wg-python-lambda-layer/application") {
+//                 script{
+//                     if (fileExists("requirements.txt")){
+//                         sh("pip3 install -r requirements.txt")
+//                     }
+//                 }
+//             }
+//         }
+ 
+//         stage("Unit Tests"){
+//             dir("files/application"){
+//                 withEnv(["PYTHONPATH=${unitTestsPythonPath}"]) {
+//                     try {
+//                         println("Testing")
+//                         sh(pythonTests.pythonUnitTestWithCoverage(unitTestsPythonPath, "python3.10"))
+//                         pythonTests.pythonUnitTestResults()
+//                         pythonTests.pythonCoverageResults()
+//                     } catch(e) {
+//                         println(e)
+//                         println("No Unit Tests to run.")
+//                     }
+//                 }
+//             }
+//         }
+
+//         stage('Static Analysis') {
+//             dir("files/application"){
+//                 try {
+//                     steps.withCredentials([string(credentialsId: 'sonarqube-token', variable: 'AUTH_TOKEN')]) {
+//                     sonarQubeAPI.setSonarQubeTags("aqf", AUTH_TOKEN)
+//                     sonarQubeAPI.setQualityGate("Highest-QualityGate", AUTH_TOKEN)
+//                     // Create sonarqube webhook for controller thoes don't have global webhook setting
+//                     // for more info:  https://confluence.watchguard.com/display/TeamInfraRed/SonarQube+Webhook+Integration
+//                     sonarQubeAPI.createWebHook(JENKINS_URL, AUTH_TOKEN)
+//                     }
+//                 } catch (e) {
+//                     println(e) println("Error in invoking the sonarqube web api")
+//                 }
+//                 // sqTesting.sqScanner(teamName, repoName, branch, "files/application") // static code analysis
+//                 // Un-comment below line for static code analysis with code coverage and comment the above line method(sqTesting.sqScanner)
+//                 sqTesting.sqScannerWithCoverage(teamName, repoName, branch, 'src', 'tests', 'coverage.xml') 
+//                 timeout(time: 1, unit: 'HOURS') { // Just in case something goes wrong, pipeline will be killed after a timeout
+//                     withSonarQubeEnv('SonarQube') {
+//                     def qg = waitForQualityGate() // Reuse taskId previously collected by withSonarQubeEnv
+//                     if (qg.status != 'OK') {
+//                         currentBuild.result = 'UNSTABLE'
+//                     }
+//                 }
+//                 }
+//             }
+//         }
+
+//         stage("Resource deployment"){
+//             dir("files/deploy"){
+//                 if (isDeploymentEnabled) {
+//                     withCredentials([[$class: "AmazonWebServicesCredentialsBinding", credentialsId: "wg-jenkins-aws", accessKeyVariable: "AWS_ACCESS_KEY_ID", secretKeyVariable: "AWS_SECRET_ACCESS_KEY"]]) {
+//                         sh("python3.10 run.py " +
+//                                 "--account-group ${accountGroup} " +
+//                                 "--environment ${environment} " +
+//                                 "--branch ${branch} " +
+//                                 "--region ${region} "
+//                         )
+//                     }
+//                 } else {
+//                     println('Deployment disabled: Skipping Lambda deployment stage.')
+//                 }
+//             }
+//         }
+
+//         stage("Invoke Lambda"){
+//             dir("files"){
+//                 if (isDeploymentEnabled && transformedString != "") {
+//                     withCredentials([[$class: "AmazonWebServicesCredentialsBinding", credentialsId: "wg-jenkins-aws", accessKeyVariable: "AWS_ACCESS_KEY_ID", secretKeyVariable: "AWS_SECRET_ACCESS_KEY"]]) {
+//                         sh("python3.10 -m deploy.helpers.lambda_invoker " +
+//                                 "--account-group ${accountGroup} " +
+//                                 "--environment ${environment} " +
+//                                 "--branch ${branch} " +
+//                                 "--region ${region} " +
+//                                 "--modified-files ${transformedString}"
+//                         )
+//                     }
+//                 } else {
+//                     println('Deployment disabled: Skipping sending files to lambda')
+//                 }
+//             }
+//         }
+//     } catch(e) {
+//         notifications.microserviceTeamsNotification(teamName, "failed", branch)
+//         error(e.getMessage())
+//     } finally {
+//         deleteDir()
+//     }
+// }
+
+// def getModifiedFiles(checkoutVariables) {
+//     println("Checkout Variables for the build : ${checkoutVariables}")
+    
+//     if(checkoutVariables['GIT_PREVIOUS_SUCCESSFUL_COMMIT']) { // Condition to check if it is the first build.
+//         def filesModified = sh(script: "git diff --name-status ${checkoutVariables['GIT_PREVIOUS_SUCCESSFUL_COMMIT']}..${checkoutVariables['GIT_COMMIT']}", returnStdout: true)
+//         return filesModified.toString()
+//     }
+//     return
+// }
+
+// def transformString(filesStr) {
+//     filesNoNewline = filesStr.replaceAll('\n', ',')
+//     filesNoSpace = filesNoNewline.replaceAll('\t', '#')
+//     transformedString = filesNoSpace.substring(0, filesNoSpace.length()-1)
+//     return transformedString
+// }
+pipeline {
+    agent any 
+    stages {
+        stage('Static Analysis') {
+            steps {
+                echo 'Run the static analysis to the code' 
+            }
+        }
+        stage('Compile') {
+            steps {
+                echo 'Compile the source code' 
+            }
+        }
+        stage('Security Check') {
+            steps {
+                echo 'Run the security check against the application' 
+            }
+        }
+        stage('Run Unit Tests') {
+            steps {
+                echo 'Run unit tests from the source code' 
+            }
+        }
+        stage('Run Integration Tests') {
+            steps {
+                echo 'Run only crucial integration tests from the source code' 
+            }
+        }
+        stage('Publish Artifacts') {
+            steps {
+                echo 'Save the assemblies generated from the compilation' 
+            }
+        }
+    }
+}
